@@ -16,6 +16,10 @@ Per-turn flow:
     sticky status bar  →  ❯ input  →  node trace  →  agent response
 """
 
+from datetime import datetime
+
+from rich.table import Table
+
 from agent.ams_engine.formulations import get_formulation
 from agent.ams_engine.routines import (
     compatible_solvers,
@@ -24,7 +28,10 @@ from agent.ams_engine.routines import (
 )
 from agent.ams_engine.snapshots import get_snapshot
 from agent.core import setup_dependencies
+from agent.memory_service import JsonFileAMSRunMemory
+from agent.schemas.study import LoadSweep, StudySpec
 from agent.session import SessionManager
+from agent.tools.run_small_study import run_small_study
 from agent.utils.display import (
     choice_prompt,
     console,
@@ -97,6 +104,81 @@ def _ask_solver(routine: str) -> str:
     return raw
 
 
+# ------------------------------------------------------------------ Study command
+_DEFAULT_SCALES = [0.90, 0.95, 1.00, 1.05, 1.10]
+
+
+def _parse_scales(token: str) -> list[float]:
+    return [float(x) for x in token.split(",") if x.strip()]
+
+
+def _looks_like_scales(token: str) -> bool:
+    try:
+        _parse_scales(token)
+        return "," in token or token.replace(".", "", 1).isdigit()
+    except ValueError:
+        return False
+
+
+def _run_study(user_input: str, session) -> None:
+    """Run a small load-scenario sweep from the current case/routine/solver.
+
+    Usage:
+        study                       ±5% / ±10% on all loads
+        study PQ_1                  sweep load PQ_1
+        study PQ_1 0.9,1.0,1.1      custom scales on PQ_1
+        study 0.9,0.95,1.05,1.1     custom scales on all loads
+
+    Runs on a fresh context from the clean base case, so it does not disturb
+    the live interactive session (its mods, routine, etc. are untouched).
+    """
+    inputs = session.state["inputs"]
+    args = user_input.split()[1:]
+
+    target = "all"
+    scales = list(_DEFAULT_SCALES)
+    if args:
+        if _looks_like_scales(args[0]):
+            scales = _parse_scales(args[0])
+        else:
+            target = args[0]
+            if len(args) >= 2:
+                try:
+                    scales = _parse_scales(args[1])
+                except ValueError:
+                    fail("Bad scale list. Example: [value]study PQ_1 0.9,1.0,1.1[/]")
+                    return
+
+    spec = StudySpec(
+        base_case=inputs.case_path,
+        routine=inputs.routine,
+        solver=inputs.solver,
+        load_sweep=LoadSweep(target=target, scales=scales),
+    )
+    out_dir = f"generated/study_{datetime.now():%Y%m%d_%H%M%S}"
+    info(f"Running study — routine [value]{spec.routine}[/], solver [value]{spec.solver}[/], "
+         f"target [value]{target}[/], [value]{len(scales)}[/] scenarios (from clean base case)…")
+
+    memory = JsonFileAMSRunMemory(root_dir=f"{out_dir}/run_memory")
+    result = run_small_study(spec, memory=memory, output_dir=out_dir)
+
+    table = Table(show_edge=True)
+    table.add_column("scenario")
+    table.add_column("label")
+    table.add_column("scale", justify="right")
+    table.add_column("objective", justify="right")
+    table.add_column("status")
+    for s in result["summary"]:
+        obj = f"{s['objective']:.6f}" if isinstance(s["objective"], (int, float)) else "—"
+        table.add_row(s["scenario_id"], s["label"], f"{s['load_scale']:.2f}", obj, s["status"])
+    console.print(table)
+
+    n_ok = sum(1 for s in result["summary"] if s["status"] == "optimal")
+    ok(f"Study complete — [value]{n_ok}/{len(result['summary'])}[/] solved.")
+    info(f"results table: [value]{result['results_table']}[/]")
+    info(f"run records:   [value]{out_dir}/run_memory[/]  (pg, plf, pd, pi/LMP, load_changes, …)")
+
+
 # ------------------------------------------------------------------ Main loop
 def run_cli():
     display_banner()
@@ -141,6 +223,12 @@ def run_cli():
             return
         if low in ("?", "h", "help"):
             display_help()
+            continue
+        if low == "study" or low.startswith("study "):
+            try:
+                _run_study(user_input, session)
+            except Exception as exc:
+                fail(f"Study error: {exc}")
             continue
 
         # Execute turn — each node self-announces via display_executing_node;

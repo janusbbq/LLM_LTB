@@ -180,7 +180,9 @@ class AMSContext:
                 out["objective"] = float(np.asarray(rtn.obj.v))
             except Exception:
                 out["objective"] = None
-        for var_name in ("pg", "plf", "pd", "pn", "aBus", "vBus", "ug"):
+        # NOTE: `pi` (LMP / power-balance dual, per bus) added for scenario
+        # studies — needed to rank high-LMP buses and explain price changes.
+        for var_name in ("pg", "plf", "pd", "pi", "pn", "aBus", "vBus", "ug"):
             if hasattr(rtn, var_name):
                 try:
                     arr = np.asarray(getattr(rtn, var_name).v, dtype=float)
