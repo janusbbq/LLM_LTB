@@ -35,6 +35,7 @@ RESULT_COLUMNS = [
     "objective",
     "solver_status",
     "run_id",
+    "error",
 ]
 
 
@@ -67,6 +68,7 @@ def _write_results_table(
                     "objective": s["objective"],
                     "solver_status": s["status"],
                     "run_id": s["run_id"],
+                    "error": s.get("error"),
                 }
             )
     return path
@@ -82,6 +84,11 @@ def run_small_study(
 
     Returns a summary dict: ``scenario_table`` path, the ``rows`` (with updated
     status), a per-scenario ``summary`` list, and the ``memory`` used.
+
+    Status vocabulary (identical in the scenario table, the results table, and
+    the run record) is one of: ``optimal`` (solved & converged), ``failed``
+    (solved but did not converge), or ``error`` (an exception was raised). The
+    ``objective`` is ``None`` unless the run is ``optimal``.
     """
     rows, csv_path = generate_scenarios(spec, output_dir=output_dir)
     ctx = ctx or AMSContext()
@@ -112,27 +119,33 @@ def run_small_study(
                 results=results,
             )
             run_id = memory.save_run(record)
-            row["status"] = "success"
+            # Status mirrors the actual solver outcome (a solve can return
+            # without raising yet not converge), and is the SAME vocabulary in
+            # the scenario table, the results table, and the record:
+            # optimal | failed | error.
+            row["status"] = record["solver_status"]           # optimal | failed
             summary.append(
                 {
                     "scenario_id": row["scenario_id"],
                     "label": row["scenario_label"],
                     "load_scale": row["load_scale"],
-                    "objective": results.get("objective"),
+                    "objective": record["objective_cost"],     # None unless optimal
                     "status": record["solver_status"],
                     "run_id": run_id,
+                    "error": None,
                 }
             )
         except Exception as exc:  # a failed scenario must not abort the study
-            row["status"] = "failed"
+            row["status"] = "error"
             summary.append(
                 {
                     "scenario_id": row["scenario_id"],
                     "label": row["scenario_label"],
                     "load_scale": row["load_scale"],
                     "objective": None,
-                    "status": f"error: {exc}",
+                    "status": "error",
                     "run_id": None,
+                    "error": str(exc),
                 }
             )
 

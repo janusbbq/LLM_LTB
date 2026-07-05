@@ -21,11 +21,26 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
+
+
+# A run_id is derived from user-influenced fields (routine / scenario_label) and,
+# in web mode, may arrive from an external request. Never let it reach the
+# filesystem raw — strip path separators and any other unsafe characters so it
+# cannot escape the store directory (path traversal). Platform-independent:
+# whitelisting drops both "/" and "\" regardless of os.sep.
+_UNSAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_run_id(run_id: str) -> str:
+    """Return a filename-safe token for ``run_id`` (no traversal, no separators)."""
+    cleaned = _UNSAFE_FILENAME.sub("_", str(run_id)).strip("._")
+    return cleaned or "run"
 
 
 # --------------------------------------------------------------------------- #
@@ -90,7 +105,7 @@ def make_ams_run_record(
         lmp["values"] = list(np.asarray(results["pi"], dtype=float).ravel())
 
     return {
-        "run_id": f"{routine}_{(scenario_label or 'run')}_{uuid.uuid4().hex[:6]}",
+        "run_id": safe_run_id(f"{routine}_{scenario_label or 'run'}_{uuid.uuid4().hex[:6]}"),
         "case_path": case_path,
         "routine": routine,
         "solver": solver,
@@ -99,7 +114,9 @@ def make_ams_run_record(
         "load_changes": inputs.get("load_changes", []),
         "generator_changes": inputs.get("generator_changes", []),
         "line_changes": inputs.get("line_changes", []),
-        "objective_cost": results.get("objective"),
+        # Only trust the objective when the solve converged — a non-converged
+        # solve can still return a stale/meaningless value.
+        "objective_cost": results.get("objective") if converged else None,
         "solver_status": "optimal" if converged else "failed",
         "pg_shape": pg_shape,
         "lmp_summary": lmp,
@@ -158,7 +175,9 @@ class JsonFileAMSRunMemory:
         os.makedirs(self.root_dir, exist_ok=True)
 
     def _path(self, run_id: str) -> str:
-        return os.path.join(self.root_dir, f"{run_id}.json")
+        # Sanitize here too (defense in depth): save_run/get_run may receive an
+        # externally-supplied run_id that never went through make_ams_run_record.
+        return os.path.join(self.root_dir, f"{safe_run_id(run_id)}.json")
 
     def save_run(self, record: Dict[str, Any]) -> str:
         run_id = record["run_id"]
