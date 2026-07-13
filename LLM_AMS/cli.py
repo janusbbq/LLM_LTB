@@ -32,6 +32,7 @@ from agent.memory_service import JsonFileAMSRunMemory
 from agent.schemas.study import LoadSweep, StudySpec
 from agent.session import SessionManager
 from agent.tools.run_small_study import run_small_study
+from agent.tools.write_report import write_report
 from agent.utils.display import (
     choice_prompt,
     console,
@@ -177,6 +178,15 @@ def _run_study(user_input: str, session) -> None:
     ok(f"Study complete — [value]{n_ok}/{len(result['summary'])}[/] solved.")
     info(f"results table: [value]{result['results_table']}[/]")
     info(f"run records:   [value]{out_dir}/run_memory[/]  (pg, plf, pd, pi/LMP, load_changes, …)")
+
+    # Auto-build the cross-scenario report (Option A) over the fresh study.
+    # A report failure must not lose the study results, so isolate it.
+    try:
+        report = write_report(out_dir)
+        info(f"report:        [value]{report['report']}[/]  "
+             "(objective Δ, LMP ranking, dispatch shifts)")
+    except Exception as exc:
+        fail(f"Report generation failed: {exc}")
 
 
 # ------------------------------------------------------------------ Main loop
