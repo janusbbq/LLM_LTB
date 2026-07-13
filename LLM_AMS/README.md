@@ -1,7 +1,4 @@
-# LLM-LTB: AI-Enabled Power System Large-scale Testbed
-
-## Update:
-We are developing LLM for ANDES for transient stability modeling and simulation; LLM for AMS for scheduling modeling and simulation.
+# LLM-AMS: AI-Powered Power System Scheduling
 
 **Conversational LangGraph agent that drives [CURENT LTB AMS](https://github.com/CURENT/ams) — DCOPF, RTED, ED, UC, ACOPF — through natural-language commands.**
 
@@ -15,7 +12,8 @@ Built as a sibling to [`pv-curve-llm`](https://github.com/CURENT/pv-curve-llm); 
 - [Phase 1 Routes (1-6)](#phase-1-routes-1-6)
 - [Architecture](#architecture)
 - [Installation](#installation)
-- [Quick Start](#quick-start)
+- [Quick Start (Terminal CLI)](#quick-start-terminal-cli)
+- [Web Platform (Local)](#web-platform-local)
 - [Usage Examples](#usage-examples)
 - [LangGraph Workflow](#langgraph-workflow)
 - [Configuration](#configuration)
@@ -124,6 +122,25 @@ pip install -r requirements.txt
 
 `requirements.txt` pulls in `ltbams` (which brings ANDES + cvxpy + kvxopt), LangChain stack, plus open-source solvers `highspy` + `pyscipopt`. cvxpy's bundled `CLARABEL`, `OSQP`, `SCS`, `SCIPY` are always available.
 
+### Or with a plain virtualenv (no conda)
+
+```powershell
+# Windows PowerShell — from the project root (folder with main.py)
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+```bash
+# macOS / Linux
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+> If PowerShell blocks `Activate.ps1` (execution policy), don't activate — just
+> call the interpreter by path, e.g. `.\.venv\Scripts\python.exe main.py`.
+
 ### Ollama (default LLM)
 
 ```bash
@@ -146,7 +163,7 @@ python -c "import ams, cvxpy; print(ams.__version__, cvxpy.installed_solvers())"
 
 ---
 
-## Quick Start
+## Quick Start (Terminal CLI)
 
 ```bash
 conda activate llm-ams
@@ -161,6 +178,86 @@ You will be asked three things in order (each has a default — just hit Enter):
 3. **Solver**: shown filtered by your routine's compatibility *(default first in list)*
 
 The agent then loads the **ex2 default case** `5bus/pjm5bus_demo.xlsx` and you're at the prompt.
+
+---
+
+## Web Platform (Local)
+
+Besides the terminal CLI, LLM-AMS ships a **local web app** — a single-page browser dashboard with an **Assistant chat**, live **equation rendering** (MathJax), routine-aware **case data**, a one-click **solver**, and an auto-generated **power-system analysis report**.
+
+### 1. Install web dependencies
+
+The web app reuses the agent stack and adds **FastAPI + Uvicorn**:
+
+```bash
+# from the project root (the folder with main.py and web/)
+pip install -r requirements.txt        # agent + AMS stack (enables the chat)
+pip install -r web/requirements.txt    # adds fastapi + uvicorn[standard]
+```
+
+> **Viewer only** (no chat)? `pip install -r web/requirements.txt` alone is enough — the equation viewer, case tables, **Run solve** and **report** all work without the LangChain / LLM stack. The chat simply shows a friendly "install the LLM stack" notice.
+
+### 2. (Optional) Choose the chat model
+
+The Assistant uses the same LLM backend as the CLI. For local **Ollama**, pull a model:
+
+```bash
+ollama pull llama3.1:8b     # or another model, e.g. `ollama pull llama3.2`
+```
+
+Set a default before launching, or switch it live from the sidebar **Assistant model** dropdown:
+
+```powershell
+$env:OLLAMA_MODEL = "llama3.1:8b"   # Windows PowerShell
+```
+
+For **OpenAI**, put `OPENAI_API_KEY` in `.env` and pick *OpenAI* in the dropdown.
+
+### 3. Launch the server
+
+Run **from the project root** so the static frontend and the `generated/` plots resolve:
+
+```bash
+python -m uvicorn web.backend.main:app --host 127.0.0.1 --port 8000
+```
+
+On Windows using the bundled virtual-env, call the interpreter by path:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn web.backend.main:app --host 127.0.0.1 --port 8000
+```
+
+*(The first launch takes ~15-30 s while the AMS stack imports — wait for `Application startup complete`.)*
+
+### 4. Open the app
+
+### → http://127.0.0.1:8000
+
+| Area | What it does |
+|---|---|
+| **Assistant** (top, full-width) | natural-language chat — *"switch to ieee14_uced and run UC"* |
+| **Left bar** | grid case · routine · LLM provider / model |
+| **Middle bar** | problem formulation (equations) + solve results |
+| **Right bar** | generated analysis report |
+
+Drag the divider under the Assistant (and the one left of the report) to change the split; **double-click** a divider to reset.
+
+### API (served by the same process)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/health` | liveness probe |
+| `GET` | `/api/routines`, `/api/cases`, `/api/solvers/{routine}` | pickers |
+| `GET` | `/api/formulation/{routine}` | LaTeX objective + constraints |
+| `GET` | `/api/case?routine=&case=` | routine-aware case tables |
+| `POST` | `/api/solve` | run a routine → objective + plots |
+| `POST` | `/api/report` | build a Markdown analysis report |
+| `POST` | `/api/chat` | one conversational agent turn |
+| `GET` / `POST` | `/api/llm` | read / switch LLM provider + model |
+
+### Which case works with which routine?
+
+Economic routines (**RTED / ED / UC / DCOPF**) need generator-cost + reserve data — use **`pjm5bus_demo`** or any **`*_uced`** case (`ieee14_uced`, `ieee39_uced`, …). Plain topology cases (`ieee14`, `ieee39`, `case118`, `npcc`, `wecc`) only fit power-flow routines (**DCPF / PFlow**). Mixing them shows an actionable message telling you the fix.
 
 ---
 
@@ -349,6 +446,13 @@ LLM_AMS/
 │       ├── common_utils.py
 │       ├── context.py
 │       └── display.py            # rich banner / parameter table / streaming
+│
+├── web/                          # local web platform (see "Web Platform (Local)")
+│   ├── backend/                  # FastAPI app: main.py + report.py + case_data.py
+│   ├── frontend/                 # index.html · app.js · styles.css (MathJax)
+│   ├── requirements.txt          # fastapi + uvicorn[standard] (+ ltbams)
+│   ├── Dockerfile
+│   └── docker-compose.yml
 │
 └── generated/                    # output plots (gitignored)
 ```

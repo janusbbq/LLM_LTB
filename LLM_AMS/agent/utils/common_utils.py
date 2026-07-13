@@ -9,6 +9,7 @@ def create_initial_state(case_path: str = "5bus/pjm5bus_demo.xlsx",
     return {
         "messages": [],
         "message_type": None,
+        "is_multi_step": False,
         "inputs": Inputs(case_path=case_path, routine=routine, solver=solver),
         "results": None,
         "error_info": None,

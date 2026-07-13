@@ -1,0 +1,9 @@
+# LLM-AMS web platform — backend dependencies (equation + case-data viewer)
+# pip install -r web/requirements.txt
+#
+# The viewer-only scope does NOT need the LangChain / LangGraph stack — it just
+# needs AMS (for live case data) and FastAPI (to serve the API + frontend).
+
+ltbams>=1.0.0          # brings ams, andes, cvxpy, numpy, scipy, pandas
+fastapi>=0.110
+uvicorn[standard]>=0.29

@@ -1,0 +1,29 @@
+# LLM-AMS local web platform.
+#
+#   cd web
+#   docker compose up --build
+#
+# Then open http://127.0.0.1:8000
+#
+# The service is published ONLY on the loopback interface (127.0.0.1) so it is
+# not reachable from other machines. When you later deploy to a public server,
+# change the published address (e.g. "0.0.0.0:8000:8000") and put it behind a
+# reverse proxy / TLS.
+
+services:
+  web:
+    build:
+      context: ..                 # project root, so agent/ and web/ are both in scope
+      dockerfile: web/Dockerfile
+    image: llm-ams-web:0.1.0
+    container_name: llm-ams-web
+    ports:
+      - "127.0.0.1:8000:8000"     # host loopback only
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s           # AMS import + default case load takes a moment

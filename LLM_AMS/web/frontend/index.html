@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM · LTB · AMS — Scheduling Studio</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="styles.css?v=3" />
+
+  <!-- MathJax 3: enable both display (\[ \] / $$) and inline ($ / \( \)) math -->
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['\\[', '\\]'], ['$$', '$$']],
+        processEscapes: true,
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+      },
+      startup: {
+        typeset: false,   // we typeset explicitly after rendering each view
+      },
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+  <!-- marked: Markdown -> HTML for the formal analysis report -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">LLM<span class="dot">·</span>LTB<span class="dot">·</span>AMS</span>
+      <span class="brand-sub">Optimal scheduling formulations, case data &amp; analysis — CURENT LTB AMS</span>
+    </div>
+    <div class="status" id="status">starting…</div>
+  </header>
+
+  <div class="shell">
+    <!-- Assistant: primary interaction surface, spans full width below the banner -->
+    <section class="card" id="chat-card">
+      <div class="card-head">
+        <h2>Assistant</h2>
+        <p class="subtitle">Prompt the agent in natural language — e.g. “trip line 3 and re-run”, “raise load A2 to 4.0”, “explain the RTED objective”.</p>
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <form id="chat-form" class="chat-input">
+        <textarea id="chat-text" rows="2" placeholder="Ask the agent…  (Enter to send · Shift+Enter for newline)"></textarea>
+        <button id="chat-send" class="btn btn-primary" type="submit">Send</button>
+      </form>
+    </section>
+
+    <div class="v-resizer" id="v-resizer" role="separator" aria-orientation="horizontal"
+         title="Drag to resize the Assistant pane · double-click to reset"></div>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar">
+      <div class="control">
+        <label for="case-select">Grid case</label>
+        <select id="case-select"></select>
+      </div>
+
+      <div class="control">
+        <span class="control-label">Routine</span>
+        <div id="routine-list" class="routine-list" aria-label="Routine selector"></div>
+      </div>
+
+      <div class="control">
+        <label for="provider-select">Assistant model</label>
+        <select id="provider-select" title="LLM provider driving the chat agent"></select>
+        <select id="model-select" title="Model for the selected provider"></select>
+        <p id="llm-note" class="control-note"></p>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- Formulation (MathJax centerpiece) -->
+      <section class="card" id="formulation-card">
+        <div class="card-head">
+          <h1 id="f-title">—</h1>
+          <p id="f-subtitle" class="subtitle"></p>
+        </div>
+        <div id="f-body" class="formulation-body"></div>
+      </section>
+
+      <!-- Routine-aware case data -->
+      <section class="card" id="case-card">
+        <div class="card-head">
+          <h2 id="c-label">Case data</h2>
+          <p id="c-meta" class="subtitle"></p>
+        </div>
+        <div id="c-body" class="tables-body"></div>
+      </section>
+
+      <!-- Solve + key result outputs -->
+      <section class="card" id="results-card">
+        <div class="card-head results-head">
+          <div>
+            <h2>Results</h2>
+            <p class="subtitle">Run the active routine, then read the headline numbers below.</p>
+          </div>
+          <div class="run-controls">
+            <label class="solver-label" for="solver-select">Solver</label>
+            <select id="solver-select" title="Compatible solvers for this routine"></select>
+            <button id="run-btn" class="btn btn-primary" type="button">► Run solve</button>
+            <button id="report-btn" class="btn btn-report" type="button">▤ Generate analysis report</button>
+          </div>
+        </div>
+        <div id="results-body" class="results-body">
+          <p class="empty-note">No solve yet. Press <strong>Run solve</strong> to compute results for the selected routine and case.</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Right: formal, markdown-rendered power system analysis report -->
+    <aside class="report-panel" id="report-panel" aria-hidden="true">
+      <div class="report-resizer" id="report-resizer" role="separator" aria-orientation="vertical"
+           title="Drag to resize · double-click to reset"></div>
+      <div class="report-toolbar">
+        <span class="report-toolbar-title">Power System Analysis Report</span>
+        <div class="report-toolbar-actions">
+          <button id="report-refresh" class="btn-ghost" type="button" title="Re-run and refresh">⟳</button>
+          <button id="report-print" class="btn-ghost" type="button" title="Print / save as PDF">⎙</button>
+          <button id="report-close" class="btn-ghost" type="button" title="Close report">✕</button>
+        </div>
+      </div>
+      <article id="report-doc" class="report-doc" tabindex="0"></article>
+    </aside>
+    </div>
+  </div>
+
+  <script src="app.js?v=3"></script>
+</body>
+</html>

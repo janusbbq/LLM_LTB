@@ -22,6 +22,20 @@ class MessageClassifier(BaseModel):
             "case_io (load/inspect/export case file), "
             "configure (routine/solver/config/constraint enable-disable), "
             "modify (load p0, trip gen/line, line rate), "
-            "solve (run the active routine)."
+            "solve (run the active routine). For a message that mixes MULTIPLE "
+            "actions, pick the LAST action here and set is_multi_step=true."
+        ),
+    )
+
+    is_multi_step: bool = Field(
+        default=False,
+        description=(
+            "True when the message asks for MORE THAN ONE action that must run "
+            "in sequence — e.g. load/switch a case AND run it, change a value "
+            "AND solve, or 'do A then B'. Works in any language (English or "
+            "Chinese). Examples that are multi-step: 'switch to ieee39 and run "
+            "UC', '换成ieee39节点，运行uc问题', 'change load PQ_1 to 3.2 then "
+            "solve'. A single action (just 'run RTED', just 'load ieee14') is "
+            "NOT multi-step."
         ),
     )

@@ -15,6 +15,7 @@ from langgraph.graph.message import add_messages
 class State(TypedDict):
     messages: Annotated[list, add_messages]
     message_type: Optional[str]
+    is_multi_step: bool
     inputs: Any
     results: Optional[dict]
     error_info: Optional[dict]

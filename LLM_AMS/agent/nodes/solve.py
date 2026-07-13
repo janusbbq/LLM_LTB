@@ -8,16 +8,36 @@ Plot failures are isolated so the user always sees the objective + values.
 """
 
 from datetime import datetime
-from typing import Iterable, List
+from typing import Iterable, List, Optional
+import re
 
 import numpy as np
 from langchain_core.messages import AIMessage
 
 from agent.ams_engine.constraint_check import check_constraints
 from agent.ams_engine.plotting import plot_results
+from agent.ams_engine.routines import all_routine_names
 from agent.schemas.response import NodeResponse
 from agent.state.app_state import State
 from agent.utils.display import display_constraint_check, display_executing_node
+
+
+def _parse_routine(text: str) -> Optional[str]:
+    """Return a routine name explicitly requested in ``text`` (e.g. "run UC",
+    "运行uc问题"), or ``None`` if none is named.
+
+    Matches known AMS routine names, longest first (so ``RTED2`` wins over
+    ``RTED``). Boundaries exclude ASCII letters/digits only, so a name embedded
+    in CJK text ("运行uc问题") still matches while substrings inside larger
+    English words ("reduce" → not "uc") do not.
+    """
+    if not text:
+        return None
+    low = text.lower()
+    for name in sorted(all_routine_names(), key=len, reverse=True):
+        if re.search(rf"(?<![a-z0-9]){re.escape(name.lower())}(?![a-z0-9])", low):
+            return name
+    return None
 
 
 def _fmt_1d(arr, labels: Iterable[str], fmt: str = "{:.4f}") -> List[str]:
@@ -78,6 +98,8 @@ def solve_agent(state: State, llm, prompts, ams_ctx):
     display_executing_node("solve")
 
     inputs = state["inputs"]
+    last_message = state["messages"][-1] if state.get("messages") else None
+    user_text = getattr(last_message, "content", "") if last_message else ""
 
     if ams_ctx.system is None:
         msg = "No case is loaded. Try: 'load case 5bus/pjm5bus_demo.xlsx'."
@@ -86,9 +108,17 @@ def solve_agent(state: State, llm, prompts, ams_ctx):
                           message=msg, timestamp=datetime.now())
         return {"messages": [reply], "node_response": nr}
 
+    # If the user named a routine in this message (e.g. "run UC", "运行uc问题"),
+    # honor it; otherwise fall back to the active routine from inputs.
+    requested_routine = _parse_routine(user_text)
+    routine_name = requested_routine or inputs.routine
+    new_inputs = (inputs.model_copy(update={"routine": routine_name})
+                  if requested_routine and requested_routine != inputs.routine
+                  else None)
+
     # --- run the routine ---
     try:
-        ams_ctx.set_routine(inputs.routine)
+        ams_ctx.set_routine(routine_name)
         results = ams_ctx.solve(solver=inputs.solver)
     except Exception as exc:
         return {"error_info": {
@@ -146,4 +176,7 @@ def solve_agent(state: State, llm, prompts, ams_ctx):
         timestamp=datetime.now(),
         metadata={"plots": plots},
     )
-    return {"messages": [reply], "results": results, "node_response": nr}
+    out = {"messages": [reply], "results": results, "node_response": nr}
+    if new_inputs is not None:
+        out["inputs"] = new_inputs
+    return out

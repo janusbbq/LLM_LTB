@@ -1,0 +1,16 @@
+# Build-context excludes for the Docker image (context = project root)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.venv/
+venv/
+env/
+generated/
+*.png
+.env
+.git/
+.gitignore
+.DS_Store
+._*
+**/.pytest_cache/
+**/node_modules/

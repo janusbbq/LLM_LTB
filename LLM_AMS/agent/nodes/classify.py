@@ -19,8 +19,12 @@ def classify_message(state: State, llm, prompts):
     nr = NodeResponse(
         node_type="classifier",
         success=True,
-        data={"message_type": result.message_type},
-        message=f"Classified as: {result.message_type}",
+        data={"message_type": result.message_type,
+              "is_multi_step": result.is_multi_step},
+        message=f"Classified as: {result.message_type}"
+                + (" (multi-step)" if result.is_multi_step else ""),
         timestamp=datetime.now(),
     )
-    return {"message_type": result.message_type, "node_response": nr}
+    return {"message_type": result.message_type,
+            "is_multi_step": result.is_multi_step,
+            "node_response": nr}

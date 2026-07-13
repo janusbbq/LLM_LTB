@@ -8,6 +8,10 @@ factory that strips and formats them.
 CLASSIFIER_SYSTEM = """
 You classify the user's message into ONE of six AMS routes.
 
+The message may be written in English OR Chinese — classify by MEANING, not by
+matching English keywords. (e.g. "换成ieee39" = switch case to ieee39 → case_io;
+"运行/求解/计算" = run/solve → solve; "改成UC/切换到UC" = set routine → configure.)
+
 - **question_general**: Conceptual / educational questions about AMS, scheduling, optimization, DCOPF, RTED, ED, UC, CVXPY, cvxpy-based formulations, market simulation, ANDES integration.
   Examples: "What is RTED?", "Difference between DCOPF and RTED?", "Why disable plflb?", "What does config_t do?"
 
@@ -15,18 +19,22 @@ You classify the user's message into ONE of six AMS routes.
   Examples: "What routines can I run?", "Which solvers are installed?", "List loads", "Show generators", "What cases ship with AMS?"
 
 - **case_io**: Load, inspect, or export a case file.
-  Examples: "Load case 5bus/pjm5bus_demo.xlsx", "Switch to ieee14_uced", "Load matpower/case118.m", "Show me the current case info"
+  Examples: "Load case 5bus/pjm5bus_demo.xlsx", "Switch to ieee14_uced", "换成ieee39节点", "Load matpower/case118.m", "Show me the current case info"
 
 - **configure**: Change ROUTINE settings — active routine, solver, config_t (interval), enable/disable constraints.
-  Examples: "Use solver SCS", "Switch routine to DCOPF", "Set interval to 1 hour", "Disable plflb and plfub", "Re-enable rgu"
+  Examples: "Use solver SCS", "Switch routine to DCOPF", "切换到UC", "Set interval to 1 hour", "Disable plflb and plfub", "Re-enable rgu"
 
 - **modify**: Change the PHYSICAL system — load values, generator on/off, line on/off, line rate_a.
   Examples: "Change load PQ_1 to 3.2", "Trip generator PV_1", "Trip line Line_2", "Restore PV_1", "Set Line_3 rate to 0.6"
 
 - **solve**: Run the active routine (RTED, DCOPF, ED, UC, ...).
-  Examples: "Solve", "Run RTED", "Run the dispatch", "Solve with CLARABEL"
+  Examples: "Solve", "Run RTED", "运行", "求解", "Run the dispatch", "Solve with CLARABEL"
 
-Pick the BEST single category. If the message clearly mixes multiple actions (e.g. "change load PQ_1 to 3.2 then solve"), pick the LAST action and let the planner split it.
+Pick the BEST single category for ``message_type``. If the message clearly mixes
+multiple actions that must run in sequence (e.g. "change load PQ_1 to 3.2 then
+solve", or "换成ieee39节点，运行uc问题" = switch to ieee39 AND run UC), pick the
+LAST action for ``message_type`` AND set ``is_multi_step`` = true so the planner
+can split it. A single action is NOT multi-step.
 """.strip()
 
 
@@ -156,6 +164,9 @@ Rules:
 PLANNER_SYSTEM = """
 Decompose a multi-step AMS request into an ordered list of single-route steps.
 
+The request may be in English OR Chinese — decompose by MEANING. Each step's
+``content`` should be a clear instruction (English is fine) the route can run.
+
 Each step picks ONE route action:
 - question_general
 - question_parameter
@@ -168,8 +179,17 @@ Rules:
 1. Preserve user order.
 2. Each step's ``content`` MUST be a complete natural-language instruction
    the corresponding route can execute independently.
-3. Always end with ``solve`` if the user asks for results / plot / objective
+3. Switching the CASE (loading a different case file/alias) is ``case_io``.
+   Switching the active ROUTINE (RTED, DCOPF, ED, UC, ...) is ``configure``.
+   So "run UC on ieee39" = load ieee39 (case_io) → set routine to UC
+   (configure) → solve.
+4. Always end with ``solve`` if the user asks for results / plot / objective
    after their changes.
+
+Example — user: "换成ieee39节点，运行uc问题" (switch to ieee39, run the UC problem):
+  step 1 case_io   "load case ieee39"
+  step 2 configure "set the active routine to UC"
+  step 3 solve     "run the active routine"
 
 **Current session**:
 - case_path: {case_path}
