@@ -224,6 +224,22 @@ def _limits(ss, model: str, attr: str) -> Optional[np.ndarray]:
         return None
 
 
+def _gen_limits(ss, gen_idx, attr: str) -> Optional[np.ndarray]:
+    """Generator limits (Pmin/Pmax), aligned to ``gen_idx``.
+
+    ``StaticGen`` is an AMS *group* (an aggregate of the ``PV`` + ``Slack``
+    models), not a Model, so ``ss.StaticGen.pmax`` raises ``AttributeError``.
+    Group values must be read via ``.get(src=..., idx=..., attr='v')`` — which
+    also guarantees alignment with the dispatch order in ``gen_idx``.
+    """
+    try:
+        return np.asarray(
+            ss.StaticGen.get(src=attr, idx=list(gen_idx), attr="v"), dtype=float
+        )
+    except Exception:
+        return None
+
+
 # --------------------------------------------------------------------------- #
 #  Section builders
 # --------------------------------------------------------------------------- #
@@ -326,8 +342,10 @@ def _gen_section(ss, results) -> List[str]:
     if pg is None:
         return []
     gen_idx = results.get("gen_idx") or list(range(pg.shape[0]))
-    pmax = _limits(ss, "StaticGen", "pmax")
-    pmin = _limits(ss, "StaticGen", "pmin")
+    # StaticGen is a group (PV + Slack) — read its limits via .get(), not by
+    # direct attribute access, and align them to gen_idx.
+    pmax = _gen_limits(ss, gen_idx, "pmax")
+    pmin = _gen_limits(ss, gen_idx, "pmin")
     pg_dev = _reduce_dev(pg, "max")
     multiperiod = pg.ndim == 2
 
