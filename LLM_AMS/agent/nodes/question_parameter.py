@@ -2,11 +2,12 @@
 
 from datetime import datetime
 
-from agent.ams_engine.engine import SHIPPED_CASES
+from agent.ams_engine.case_catalog import catalog_summary
 from agent.ams_engine.routines import (
     all_routine_names,
     compatible_solvers,
     installed_solvers,
+    routine_help,
 )
 from agent.schemas.response import NodeResponse
 from agent.state.app_state import State
@@ -24,7 +25,9 @@ def _build_snapshot(state, ams_ctx) -> str:
         f"- Installed cvxpy solvers: {', '.join(installed_solvers())}",
         f"- Solvers compatible with {inputs.routine}: {', '.join(compatible_solvers(inputs.routine)) or '(none)'}",
         "",
-        f"- AMS-shipped case aliases: {', '.join(sorted(SHIPPED_CASES.keys()))}",
+        f"- Common routines:\n{routine_help()}",
+        "",
+        f"- AMS-shipped cases (say the keyword, a bus number, or a name to load):\n{catalog_summary()}",
     ]
 
     info = ams_ctx.case_info() if ams_ctx.system is not None else {"loaded": False}

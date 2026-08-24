@@ -45,10 +45,9 @@ def configure_agent(state: State, llm, prompts, ams_ctx):
                 summary.append(f"case_path → {ch.value}  (use 'load case ...' to actually load)")
 
             elif ch.target == "routine":
-                name = str(ch.value).upper()
-                ams_ctx.set_routine(name)
-                updates["routine"] = name
-                summary.append(f"routine → {name}")
+                resolved = ams_ctx.set_routine(str(ch.value))
+                updates["routine"] = resolved
+                summary.append(f"routine → {resolved}")
 
             elif ch.target == "solver":
                 solver = str(ch.value).upper()

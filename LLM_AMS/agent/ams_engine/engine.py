@@ -18,44 +18,30 @@ from typing import Any, Dict, List, Optional
 import ams
 import numpy as np
 
-from agent.ams_engine.routines import compatible_solvers, routine_family
-
-
-# AMS-shipped cases keyed by short alias the user can type.
-SHIPPED_CASES = {
-    "pjm5bus": "5bus/pjm5bus_demo.xlsx",
-    "pjm5bus_demo": "5bus/pjm5bus_demo.xlsx",
-    "5bus": "5bus/pjm5bus_demo.xlsx",
-    "pjm5bus_ev": "5bus/pjm5bus_ev.xlsx",
-    "pjm5bus_jumper": "5bus/pjm5bus_jumper.xlsx",
-    "ieee14": "ieee14/ieee14.json",
-    "ieee14_uced": "ieee14/ieee14_uced.xlsx",
-    "ieee14_conn": "ieee14/ieee14_conn.xlsx",
-    "ieee14_raw": "ieee14/ieee14.raw",
-    "ieee39": "ieee39/ieee39.xlsx",
-    "ieee39_uced": "ieee39/ieee39_uced.xlsx",
-    "case14": "matpower/case14.m",
-    "case39": "matpower/case39.m",
-    "case118": "matpower/case118.m",
-    "case300": "matpower/case300.m",
-    "npcc": "npcc/npcc.xlsx",
-    "wecc": "wecc/wecc.xlsx",
-}
+from agent.ams_engine.case_catalog import SHIPPED_CASES, resolve_case
+from agent.ams_engine.routines import (
+    compatible_solvers,
+    is_routine_class,
+    resolve_routine,
+    routine_family,
+)
 
 
 def resolve_case_path(case: str) -> str:
-    """Resolve a short alias or sub-path into a real case file path.
+    """Resolve a short alias, keyword, or sub-path into a real case file path.
 
     Order of resolution:
-    1. Absolute path that exists on disk
-    2. Short alias in SHIPPED_CASES
-    3. Pass-through to ``ams.get_case`` (handles AMS-shipped sub-paths
-       like ``5bus/pjm5bus_demo.xlsx``)
+    1. Absolute path that exists on disk.
+    2. Deterministic keyword resolver (:func:`resolve_case`) — handles aliases,
+       bus numbers, and name keywords. An ambiguous request resolves to that
+       family's default.
+    3. Pass-through to ``ams.get_case`` for unknown AMS sub-paths.
     """
     if os.path.isabs(case) and os.path.exists(case):
         return case
-    if case in SHIPPED_CASES:
-        return ams.get_case(SHIPPED_CASES[case])
+    res = resolve_case(case)
+    if res.path:
+        return ams.get_case(res.path)
     return ams.get_case(case)
 
 
@@ -95,14 +81,19 @@ class AMSContext:
 
     # ---------- Route 4: configure ----------
     def set_routine(self, name: str) -> str:
-        name = name.upper().strip()
+        stripped = (name or "").strip()
+        if is_routine_class(stripped):
+            resolved = stripped                       # exact class name — honor it
+        else:
+            res = resolve_routine(name)
+            resolved = res.name if res.name else stripped.upper()
         if self.system is None:
-            self.routine_name = name
-            return name
-        if not hasattr(self.system, name):
+            self.routine_name = resolved
+            return resolved
+        if not hasattr(self.system, resolved):
             raise ValueError(f"Routine '{name}' not found on system.")
-        self.routine_name = name
-        return name
+        self.routine_name = resolved
+        return resolved
 
     def active_routine(self):
         if self.system is None:

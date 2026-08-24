@@ -18,8 +18,8 @@ matching English keywords. (e.g. "换成ieee39" = switch case to ieee39 → case
 - **question_parameter**: Discovery — what routines / cases / solvers / loads / generators / lines are available in the loaded system.
   Examples: "What routines can I run?", "Which solvers are installed?", "List loads", "Show generators", "What cases ship with AMS?"
 
-- **case_io**: Load, inspect, or export a case file.
-  Examples: "Load case 5bus/pjm5bus_demo.xlsx", "Switch to ieee14_uced", "换成ieee39节点", "Load matpower/case118.m", "Show me the current case info"
+- **case_io**: Load, inspect, or export a case file. A case may be named by a bus NUMBER (e.g. "5", "14 bus", "118"), a NAME keyword (`pjm`, `ieee14`, `ieee39`, `wecc`, `npcc`, `hawaii`, `pglib`), a variant keyword (`uced`, `conn`, `ev`, `matpower`), or a file path. The exact wording does not matter — a downstream resolver maps it to the right case.
+  Examples: "Load case 5bus/pjm5bus_demo.xlsx", "change to 5 bus system", "use the pjm case", "switch to ieee14", "39 bus", "load matpower/case118.m", "换成ieee39节点", "Show me the current case info"
 
 - **configure**: Change ROUTINE settings — active routine, solver, config_t (interval), enable/disable constraints.
   Examples: "Use solver SCS", "Switch routine to DCOPF", "切换到UC", "Set interval to 1 hour", "Disable plflb and plfub", "Re-enable rgu"
@@ -118,8 +118,11 @@ Targets:
 
 Rules:
 1. Extract ALL changes implied by the user in one structured response.
-2. Use canonical routine names UPPERCASE (RTED, DCOPF, ED, UC).
-3. Use canonical solver names UPPERCASE (CLARABEL, OSQP, SCS, ...).
+2. For ``routine``, just pass the user's phrase (e.g. "unit commitment",
+   "real-time economic dispatch", "dc opf"); it is normalized to the canonical
+   class name downstream, so you need not know the exact class name.
+3. Use canonical UPPERCASE solver names (CLARABEL, OSQP, SCS, HIGHS, SCIPY,
+   SCIP, GUROBI, MOSEK, CPLEX).
 4. For ``disable_constraint`` / ``enable_constraint``, emit one entry per constraint.
 
 **Current session**:
