@@ -81,7 +81,7 @@ def check_constraints(ams_ctx, results: dict) -> List[Tuple[str, str, str]]:
                         SEV_WARN,
                     ))
                 # Lower limit (skip decommitted units at pg~0, e.g. UC/ED off)
-                if (pmin[i] > -50 and pg_min[i] > 1e-6
+                if (pmin[i] > -50 and abs(pg_min[i]) > 1e-6
                         and pg_min[i] < pmin[i] - 0.001):
                     items.append((
                         f"Gen {idx_str} below Pmin",
