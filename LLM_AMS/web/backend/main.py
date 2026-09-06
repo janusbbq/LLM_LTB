@@ -42,6 +42,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from agent.ams_engine.constraint_check import check_constraints
+from agent.ams_engine.objective_check import check_objective
 from agent.ams_engine.engine import AMSContext, SHIPPED_CASES
 from agent.ams_engine.formulations_latex import get_latex_formulation, _BY_FAMILY
 from agent.ams_engine.plotting import plot_results
@@ -244,6 +245,11 @@ def _run_solve(routine: str, case_alias: Optional[str], solver: str) -> Dict[str
     except Exception:
         results["violations"] = []
 
+    try:
+        results["objective_check"] = check_objective(_ctx, results)
+    except Exception:
+        results["objective_check"] = None
+
     info = _ctx.case_info()
     payload = {
         "routine": routine,
@@ -254,6 +260,7 @@ def _run_solve(routine: str, case_alias: Optional[str], solver: str) -> Dict[str
         "converged": results.get("converged"),
         "exit_code": results.get("exit_code"),
         "objective": results.get("objective"),
+        "objective_check": results.get("objective_check"),
         "violations": results.get("violations", []),
         "plots": _plot_urls(plots),
         "info": info,

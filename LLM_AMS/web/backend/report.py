@@ -324,17 +324,47 @@ def _objective_section(results) -> List[str]:
     obj = results.get("objective")
     if obj is None:
         return []
-    return [
+    rows = [
         "### 3.1 · Objective",
         "",
         "| Metric | Value |",
         "| --- | ---: |",
         f"| Optimized objective | `{_f(obj, 6)}` |",
+    ]
+
+    # Section-B verification: the reported objective independently recomputed
+    # from generator cost coefficients + the solved dispatch (DCOPF / RTED only;
+    # other routines report status "SKIP" and add no rows here).
+    oc = results.get("objective_check")
+    note: Optional[str] = None
+    if isinstance(oc, dict) and oc.get("status") in ("PASS", "FAIL"):
+        rel = oc.get("rel_err")
+        rel_s = f"{rel:.1e}" if isinstance(rel, (int, float)) else "—"
+        rows.append(f"| Independent recompute | `{_f(oc.get('recomputed'), 6)}` |")
+        if oc["status"] == "PASS":
+            rows.append(f"| Verification | ✓ Consistent (rel. error `{rel_s}`) |")
+            note = ("> **Verification.** The reported objective was independently "
+                    "recomputed from the generator cost coefficients and the solved "
+                    "dispatch; the two agree, confirming the objective is "
+                    "self-consistent with the reported solution.")
+        else:
+            rows.append(f"| Verification | ✗ **Mismatch** (rel. error `{rel_s}`) |")
+            note = ("> **Verification failed.** The reported objective does **not** "
+                    "match an independent recompute from the cost coefficients and "
+                    "the solved dispatch — investigate a solver, data, or reporting "
+                    "issue.")
+    elif isinstance(oc, dict) and oc.get("status") == "ERROR":
+        rows.append("| Verification | ⚠ Could not verify (recompute errored) |")
+
+    rows += [
         f"| Routine | `{results.get('routine', '—')}` |",
         f"| Solver | `{results.get('solver', '—')}` |",
         f"| Converged | `{results.get('converged')}` |",
         "",
     ]
+    if note:
+        rows += [note, ""]
+    return rows
 
 
 def _gen_section(ss, results) -> List[str]:
