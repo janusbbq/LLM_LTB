@@ -4,6 +4,7 @@ from datetime import datetime
 
 from langchain_core.messages import AIMessage
 
+from agent.ams_engine.engine import LoadCurveConflict
 from agent.schemas.parameter import SystemModifications
 from agent.schemas.response import NodeResponse
 from agent.state.app_state import State
@@ -90,6 +91,27 @@ def modify_agent(state: State, llm, prompts, ams_ctx):
                 ams_ctx.alter_line_rate(mod.idx, float(mod.value))
                 rate_overrides[mod.idx] = float(mod.value)
                 summary.append(f"line {mod.idx} rate_a → {mod.value} pu")
+
+        except LoadCurveConflict as exc:
+            # Deterministic, user-facing refusal: do not route through the LLM error handler.
+            done = ("\n".join(f"• {x}" for x in summary) + "\n\n") if summary else ""
+            content = (
+                f"{done}I did not change load {mod.idx}. This case attaches a per-load time curve "
+                f"to the active routine ({ams_ctx.routine_name}), and a fixed p0 would be multiplied "
+                f"by that curve in every time slot — the two effects would compound. "
+                f"To change this load, edit its curve in the case file's "
+                f"{'UCSlotPQ' if 'UCSlotPQ' in str(exc) else 'EDSlotPQ'} sheet instead, "
+                f"or load a case without the curve.\n\n(engine: {exc})"
+            )
+            reply = AIMessage(content=content)
+            nr = NodeResponse(node_type="modify", success=False,
+                              data={"refused": mod.model_dump(), "reason": "load_curve_conflict"},
+                              message=content, timestamp=datetime.now())
+            new_inputs = inputs.model_copy(update={
+                "load_overrides": load_overrides, "gen_off": gen_off,
+                "line_off": line_off, "line_rate_overrides": rate_overrides,
+            })
+            return {"messages": [reply], "inputs": new_inputs, "node_response": nr}
 
         except Exception as exc:
             return {"error_info": {

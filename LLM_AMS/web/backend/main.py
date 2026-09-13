@@ -22,6 +22,7 @@ GET  /api/case?routine=&case=         routine-aware data tables for a loaded cas
 POST /api/solve                       run a routine, plot results, return a summary
 POST /api/report                      build a Markdown power-system analysis report
 POST /api/chat                        natural-language turn with the LangGraph agent
+POST /api/week/build                  build an N-hour case from an uploaded profile.csv
 GET  /generated/<file>                result plots produced by a solve
 """
 
@@ -46,6 +47,7 @@ from agent.ams_engine.engine import AMSContext, SHIPPED_CASES
 from agent.ams_engine.formulations_latex import get_latex_formulation, _BY_FAMILY
 from agent.ams_engine.plotting import plot_results
 from agent.ams_engine.routines import all_routine_names, compatible_solvers, routine_family
+from agent.ams_engine.week_case import build_week_case
 from web.backend.case_data import get_case_tables
 from web.backend.report import build_report
 
@@ -111,6 +113,11 @@ CASE_PICKER = [
 _ctx = AMSContext()
 _lock = threading.Lock()                 # the AMS System is not concurrency-safe
 _state = {"alias": None}                 # alias of the case currently loaded
+# Cases built at runtime from an uploaded profile (POST /api/week/build):
+# case_id -> {"path", "label", "n_slots", "manifest"}. They join the picker and
+# resolve like shipped aliases; the id is the xlsx stem under generated/week/.
+_custom_cases: Dict[str, Dict[str, Any]] = {}
+WEEK_DIR = GENERATED_DIR / "week"
 _available_routines: set = set()         # filled at startup
 
 # Cache of the most recent solve, keyed by (case_alias, routine). Lets /api/report
@@ -139,6 +146,8 @@ _CASE_LABELS = {alias: label for alias, label in CASE_PICKER}
 
 
 def _case_label(alias: Optional[str]) -> str:
+    if alias in _custom_cases:
+        return _custom_cases[alias]["label"]
     return _CASE_LABELS.get(alias or "", alias or "—")
 
 
@@ -153,6 +162,9 @@ def _alias_for_case(case_ref: Optional[str]) -> Optional[str]:
     if not case_ref:
         return None
     raw = str(case_ref).strip()
+    for cid, c in _custom_cases.items():                # a built case, by id or by path
+        if raw == cid or raw == c["path"]:
+            return cid
     norm = raw.replace("\\", "/").lower()
     rel = SHIPPED_CASES.get(raw, "").replace("\\", "/").lower() or None
     picker = [a for a, _ in CASE_PICKER]
@@ -213,7 +225,8 @@ def _ensure_case(case_alias: Optional[str]):
     """Load the requested (or default) case if it isn't already active."""
     target = case_alias or _state["alias"] or DEFAULT_CASE_ALIAS
     if _ctx.system is None or target != _state["alias"]:
-        _ctx.load_case(target)
+        # built cases are addressed by id; everything else goes through the catalog
+        _ctx.load_case(_custom_cases.get(target, {}).get("path", target))
         _state["alias"] = target
 
 
@@ -230,7 +243,10 @@ def _run_solve(routine: str, case_alias: Optional[str], solver: str) -> Dict[str
     """
     _ensure_case(case_alias)
     _ctx.set_routine(routine)
-    results = _ctx.solve(solver=solver)
+    # Multi-period routines: ignore_dpp skips cvxpy 1.9.2's DPP canonicalisation, which
+    # fails above 160 slots; results are identical (checked at 160 slots).
+    multi_period = hasattr(_ctx.active_routine(), "timeslot")
+    results = _ctx.solve(solver=solver, ignore_dpp=multi_period)
 
     # Plots are isolated — a bad variable must not sink the whole turn.
     try:
@@ -257,6 +273,11 @@ def _run_solve(routine: str, case_alias: Optional[str], solver: str) -> Dict[str
         "violations": results.get("violations", []),
         "plots": _plot_urls(plots),
         "info": info,
+        # provenance for multi-period / curve cases (see AMSContext.solve)
+        "horizon_slots": len(results.get("slot_idx", [])) or 1,
+        "ignore_dpp": results.get("ignore_dpp", False),
+        "pq_curves": results.get("pq_curves", []),
+        "status": results.get("status", ""),
     }
     # Stash the rich result + plots so /api/report can reuse them verbatim.
     _last_solve[(_state["alias"], routine)] = {
@@ -286,6 +307,55 @@ class ChatRequest(BaseModel):
     routine: Optional[str] = None
     case: Optional[str] = None
     solver: Optional[str] = None
+
+
+class WeekBuildRequest(BaseModel):
+    """Body of POST /api/week/build: the uploaded profile.csv as text (no multipart dep)."""
+    profile_csv: str
+    base: str = DEFAULT_CASE_ALIAS          # shipped alias or absolute xlsx path
+    case_id: Optional[str] = None           # xlsx stem; default <base>_<N>h
+    unit: str = "MW"
+
+
+def _build_week_from_text(req: WeekBuildRequest) -> Dict[str, Any]:
+    """Write the uploaded CSV under generated/week/, build the N-slot case, register it.
+
+    Caller MUST hold ``_lock``. Raises ValueError/RuntimeError from the builder.
+    """
+    import re
+    text = (req.profile_csv or "").strip()
+    if not text:
+        raise ValueError("profile_csv is empty")
+    WEEK_DIR.mkdir(parents=True, exist_ok=True)
+    stem = (req.case_id or "").strip() or None
+    if stem and not re.fullmatch(r"[A-Za-z0-9_.-]+", stem):
+        raise ValueError("case_id may contain only letters, digits, '_', '.', '-'")
+    base_ref = req.base if req.base in SHIPPED_CASES or os.path.isabs(req.base) else \
+        SHIPPED_CASES.get(req.base, req.base)
+    csv_path = WEEK_DIR / f"{stem or 'upload'}.profile.csv"
+    csv_path.write_text(text + "\n")
+    art = build_week_case(base_ref, str(csv_path), str(WEEK_DIR), case_id=stem, unit=req.unit)
+    case_id = Path(art.xlsx_path).stem
+    _custom_cases[case_id] = {
+        "path": art.xlsx_path,
+        "label": f"{_case_label(req.base)} · {art.n_slots} h ({case_id})",
+        "n_slots": art.n_slots,
+        "manifest": art.manifest_path,
+    }
+    # the built file becomes the active case (a later /api/solve without `case` runs it)
+    _ctx.load_case(art.xlsx_path)
+    _state["alias"] = case_id
+    return {
+        "case_id": case_id,
+        "label": _custom_cases[case_id]["label"],
+        "path": art.xlsx_path,
+        "manifest": art.manifest_path,
+        "n_slots": art.n_slots,
+        "curve_sheets": art.curve_sheets,
+        "max_residual": art.max_residual,
+        "profile_saved_as": str(csv_path),
+        "note": "Solve with a multi-period routine (ED / UC / EDES / UCES); ignore_dpp is applied automatically.",
+    }
 
 
 class LLMRequest(BaseModel):
@@ -531,7 +601,18 @@ def create_app() -> FastAPI:
         for alias, label in CASE_PICKER:
             if alias in SHIPPED_CASES:
                 items.append({"alias": alias, "label": label, "path": SHIPPED_CASES[alias]})
+        for cid, c in _custom_cases.items():
+            items.append({"alias": cid, "label": c["label"], "path": c["path"], "built": True,
+                          "n_slots": c["n_slots"]})
         return {"cases": items, "default": DEFAULT_CASE_ALIAS}
+
+    @app.post("/api/week/build")
+    def week_build(req: WeekBuildRequest):
+        with _lock:
+            try:
+                return _build_week_from_text(req)
+            except (ValueError, RuntimeError, FileNotFoundError) as exc:
+                raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}")
 
     @app.get("/api/formulation/{routine}")
     def formulation(routine: str):
