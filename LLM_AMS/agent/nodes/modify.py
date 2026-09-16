@@ -95,13 +95,18 @@ def modify_agent(state: State, llm, prompts, ams_ctx):
         except LoadCurveConflict as exc:
             # Deterministic, user-facing refusal: do not route through the LLM error handler.
             done = ("\n".join(f"• {x}" for x in summary) + "\n\n") if summary else ""
+            # The sheet that feeds the ACTIVE routine (EDSlotPQ for ED-family, UCSlotPQ for
+            # UC-family); if the active routine has no curve, every attached sheet is named.
+            sheets = getattr(ams_ctx, "pq_curve_sheets", {})
+            active_sheet = sheets.get(ams_ctx.routine_name)
+            where = (f"the active routine ({ams_ctx.routine_name})" if active_sheet
+                     else f"routines {sorted(sheets)}")
+            edit = active_sheet or "/".join(sorted(set(sheets.values()))) or "EDSlotPQ/UCSlotPQ"
             content = (
                 f"{done}I did not change load {mod.idx}. This case attaches a per-load time curve "
-                f"to the active routine ({ams_ctx.routine_name}), and a fixed p0 would be multiplied "
-                f"by that curve in every time slot — the two effects would compound. "
-                f"To change this load, edit its curve in the case file's "
-                f"{'UCSlotPQ' if 'UCSlotPQ' in str(exc) else 'EDSlotPQ'} sheet instead, "
-                f"or load a case without the curve.\n\n(engine: {exc})"
+                f"to {where}, and a fixed p0 would be multiplied by that curve in every time slot — "
+                f"the two effects would compound. To change this load, edit its curve in the case "
+                f"file's {edit} sheet instead, or load a case without the curve.\n\n(engine: {exc})"
             )
             reply = AIMessage(content=content)
             nr = NodeResponse(node_type="modify", success=False,

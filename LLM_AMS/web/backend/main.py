@@ -121,6 +121,51 @@ _custom_cases: Dict[str, Dict[str, Any]] = {}
 # read-only at /generated for result plots, so week artifacts live outside it (data/ is
 # gitignored by pattern). Override with AMS_WEEK_DIR.
 WEEK_DIR = Path(os.environ.get("AMS_WEEK_DIR") or (Path.cwd() / "data" / "week_cases"))
+
+# Request-controlled case references (`case` on /api/solve|/api/case|/api/chat, `base` on
+# /api/week/build) may name a file only under these roots: the server's working dir (the
+# LLM_AMS project: cases/, data/, generated/), the repo-level cases/ and data/ dirs, and
+# WEEK_DIR. Extend with AMS_CASE_ROOTS (os.pathsep-separated). Shipped aliases and cases
+# built in this server are always allowed. Deployment policy — see _resolve_case_ref.
+_CASE_EXTS = (".xlsx", ".json", ".m", ".raw")
+CASE_ROOTS: List[Path] = [Path.cwd(), Path.cwd().parent / "cases", Path.cwd().parent / "data"]
+CASE_ROOTS += [Path(p) for p in os.environ.get("AMS_CASE_ROOTS", "").split(os.pathsep) if p]
+
+
+def _case_roots() -> List[Path]:
+    return CASE_ROOTS + [WEEK_DIR]                   # WEEK_DIR read at call time (tests patch it)
+
+
+def _resolve_case_ref(ref: str) -> str:
+    """Map a request-supplied case reference to something ``AMSContext.load_case`` may open.
+
+    Returns a shipped alias / catalog key unchanged, a built case id's stored path, or an
+    absolute file path that lies under one of ``CASE_ROOTS``. Anything else raises
+    ``PermissionError`` (surfaced as HTTP 400) — arbitrary server-side files are not readable
+    through the API.
+    """
+    raw = (ref or "").strip()
+    if raw in _custom_cases:
+        return _custom_cases[raw]["path"]
+    if raw in SHIPPED_CASES:
+        return raw
+    looks_like_path = os.path.isabs(raw) or raw.lower().endswith(_CASE_EXTS) and os.sep in raw
+    if not looks_like_path:
+        return raw                                   # catalog keyword ("5bus", "ieee39") -> resolver
+    p = Path(raw).expanduser().resolve()
+    if p.suffix.lower() not in _CASE_EXTS or not p.is_file():
+        raise PermissionError(f"case path {raw!r} is not an existing case file")
+    roots = _case_roots()
+    for root in roots:
+        try:
+            if p.is_relative_to(root.resolve()):
+                return str(p)
+        except (OSError, ValueError):
+            continue
+    raise PermissionError(
+        f"case path {raw!r} is outside the allowed case roots {[str(r) for r in roots]}; "
+        f"copy it under one of them or set AMS_CASE_ROOTS"
+    )
 _available_routines: set = set()         # filled at startup
 
 # Cache of the most recent solve, keyed by (case_alias, routine). Lets /api/report
@@ -228,8 +273,7 @@ def _ensure_case(case_alias: Optional[str]):
     """Load the requested (or default) case if it isn't already active."""
     target = case_alias or _state["alias"] or DEFAULT_CASE_ALIAS
     if _ctx.system is None or target != _state["alias"]:
-        # built cases are addressed by id; everything else goes through the catalog
-        _ctx.load_case(_custom_cases.get(target, {}).get("path", target))
+        _ctx.load_case(_resolve_case_ref(target))    # built id / alias / allowlisted path only
         _state["alias"] = target
 
 
@@ -335,12 +379,7 @@ def _build_week_from_text(req: WeekBuildRequest) -> Dict[str, Any]:
         raise ValueError("case_id may contain only letters, digits, '_', '.', '-'")
     # base may be a shipped alias, an absolute path, or the id of a case built earlier in
     # this server (the UI sends whatever is selected in the picker)
-    if req.base in _custom_cases:
-        base_ref = _custom_cases[req.base]["path"]
-    elif req.base in SHIPPED_CASES or os.path.isabs(req.base):
-        base_ref = req.base
-    else:
-        base_ref = SHIPPED_CASES.get(req.base, req.base)
+    base_ref = _resolve_case_ref(req.base)           # built id / alias / allowlisted path only
     csv_path = WEEK_DIR / f"{stem or 'upload'}.profile.csv"
     csv_path.write_text(text + "\n")
     art = build_week_case(base_ref, str(csv_path), str(WEEK_DIR), case_id=stem, unit=req.unit)
@@ -625,7 +664,7 @@ def create_app() -> FastAPI:
         with _lock:
             try:
                 return _build_week_from_text(req)
-            except (ValueError, RuntimeError, FileNotFoundError) as exc:
+            except (ValueError, RuntimeError, FileNotFoundError, PermissionError) as exc:
                 raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}")
 
     @app.get("/api/formulation/{routine}")
