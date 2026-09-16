@@ -482,8 +482,8 @@ function renderResults(payload) {
   if (payload.pq_curves && payload.pq_curves.length) {
     metrics.push(metricPill("load curves", payload.pq_curves.join(", ")));
   }
-  else if (warn.length) metrics.push(metricPill("warnings", String(warn.length)));
-  else metrics.push(metricPill("limits", "all respected"));
+  if (!viol.length && warn.length) metrics.push(metricPill("warnings", String(warn.length)));
+  else if (!viol.length) metrics.push(metricPill("limits", "all respected"));
 
   // plot thumbnails
   const plots = payload.plots || {};

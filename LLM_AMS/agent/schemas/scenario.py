@@ -147,7 +147,7 @@ class ComparisonResult(BaseModel):
 
     @model_validator(mode="after")
     def _same_regime(self) -> "ComparisonResult":
-        for f in ("disabled_constraints", "ignore_dpp", "ams_version", "routine", "horizon_slots"):
+        for f in ("disabled_constraints", "ignore_dpp", "ams_version", "routine", "solver", "horizon_slots"):
             b, s = getattr(self.base, f), getattr(self.scenario, f)
             if b != s:
                 raise ValueError(f"base and scenario differ in {f}: {b!r} vs {s!r}; not comparable")

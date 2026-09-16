@@ -281,16 +281,17 @@ class AMSContext:
             raise RuntimeError("No case loaded.")
         # PQ.p0 is shared by every routine on the system, so a curve attached to ANY routine
         # (not just the active one) would compound with the edit as soon as that routine runs.
-        if self.pq_curves:
-            attached = sorted({self.pq_curve_sheets.get(r, "?") for r in self.pq_curves})
-            loads = sorted({pq for pqs in self.pq_curves.values() for pq in pqs})
+        # Only the curved loads are affected: an omitted (pq, slot) cell is a factor of 1.0,
+        # so editing an uncurved load's p0 is an ordinary constant scaling.
+        curved_on = sorted(r for r, pqs in self.pq_curves.items() if str(load_idx) in pqs)
+        if curved_on:
+            attached = sorted({self.pq_curve_sheets.get(r, "?") for r in curved_on})
             raise LoadCurveConflict(
-                f"Cannot set {load_idx} p0 = {float(value)} pu: this case carries per-load time curves "
-                f"from sheet(s) {attached} on routines {sorted(self.pq_curves)} (loads with curves: "
-                f"{loads}); active routine is {self.routine_name}. The dispatched load is "
-                f"pds = sd(area, t) x curve(pq, t) x p0, so a new p0 would be multiplied by the curve "
-                f"in every slot and the two effects would compound. Change the {'/'.join(attached)} "
-                f"curve for {load_idx} in the case file instead."
+                f"Cannot set {load_idx} p0 = {float(value)} pu: this load carries a per-load time "
+                f"curve from sheet(s) {attached} on routines {curved_on}; active routine is "
+                f"{self.routine_name}. The dispatched load is pds = sd(area, t) x curve(pq, t) x p0, "
+                f"so a new p0 would be multiplied by the curve in every slot and the two effects would "
+                f"compound. Change the {'/'.join(attached)} curve for {load_idx} in the case file instead."
             )
         self.system.PQ.alter(src="p0", idx=[load_idx], value=[float(value)])
         self.active_routine().update("pd")

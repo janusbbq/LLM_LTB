@@ -71,10 +71,10 @@ def read_profile(path: str, load_idx: List[str]) -> pd.DataFrame:
     if n == 0 or not np.array_equal(hours, np.arange(1, n + 1)):
         raise ValueError(f"{path}: 'hour' must be 1..N contiguous (got {n} rows, first {hours[:3]})")
     missing = [i for i in load_idx if i not in df.columns]
-    extra = [c for c in df.columns if c.startswith("PQ") and c not in load_idx]
+    extra = [c for c in df.columns if c not in ("hour", "timestamp", *load_idx)]
     if missing or extra:
-        raise ValueError(f"{path}: load columns must match the base case's PQ idx {load_idx}; "
-                         f"missing {missing}, unknown {extra}")
+        raise ValueError(f"{path}: columns must be 'hour', optional 'timestamp', and exactly the base "
+                         f"case's PQ idx {load_idx}; missing {missing}, unknown {extra}")
     vals = df[load_idx].to_numpy(dtype=float)
     if not np.isfinite(vals).all():
         raise ValueError(f"{path}: non-finite load values")
@@ -144,6 +144,13 @@ def build_week_case(base_case: str, profile_csv: str, out_dir: str, case_id: Opt
                          "across a rebuilt horizon (specify commitment via changes.csv — not implemented)")
 
     # ---- rebuild the slot sheets with pandas ----
+    # The base may be json/m/raw (shipped aliases such as ieee14, case118, npcc): convert it
+    # through AMS's own xlsx writer first so the sheet rewrite below has an xlsx to start from.
+    os.makedirs(out_dir, exist_ok=True)
+    if not str(base_path).lower().endswith(".xlsx"):
+        converted = os.path.join(os.path.abspath(out_dir), f"{os.path.splitext(os.path.basename(base_path))[0]}.base.xlsx")
+        ams.io.xlsx.write(ss, converted, overwrite=True)
+        base_path = converted
     sheets: Dict[str, pd.DataFrame] = pd.read_excel(base_path, sheet_name=None, engine="openpyxl")
     # A base that is itself a built week case carries its own EDSlotPQ/UCSlotPQ and Summary
     # rows; they describe the OLD profile. Drop them so they can neither stay active nor be

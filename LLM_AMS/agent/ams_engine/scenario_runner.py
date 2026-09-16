@@ -20,6 +20,10 @@ def run_case(case_path: str, routine: str, solver: str, ignore_dpp: bool,
     ctx.load_case(case_path)
     ctx.set_routine(routine)
     if disabled_constraints:
+        known = set(ctx.active_routine().constrs)
+        unknown = sorted(set(disabled_constraints) - known)
+        if unknown:
+            raise ValueError(f"{routine} has no constraint(s) {unknown}; known: {sorted(known)}")
         ctx.disable_constraints(list(disabled_constraints))
     res = ctx.solve(solver, ignore_dpp=ignore_dpp)
     return RunRecord.from_solve(res, label=label, case_path=ctx.case_path)

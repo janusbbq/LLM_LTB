@@ -53,7 +53,7 @@ def _line_plot(arr2d, labels, ylabel, title, save_path):
     for i in range(n_dev):
         lbl = str(labels[i]) if labels and i < len(labels) else str(i)
         ax.plot(x, arr2d[i], marker=marker, markersize=3, linewidth=1.4, label=lbl)
-    if n_t > 48 and n_t % 24 == 0:                     # day boundaries on hourly horizons
+    if n_t > 48:                                       # day boundaries on hourly horizons
         for d in range(24, n_t, 24):
             ax.axvline(d, color="grey", lw=0.5, alpha=0.5)
     ax.set_xlabel("Time period")

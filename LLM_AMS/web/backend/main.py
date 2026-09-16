@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.ams_engine.constraint_check import check_constraints
 from agent.ams_engine.engine import AMSContext, SHIPPED_CASES
@@ -356,9 +356,18 @@ class ChatRequest(BaseModel):
     solver: Optional[str] = None
 
 
+# Upload limits for /api/week/build: 8760 hourly rows x ~5 loads is well under 1 MB.
+MAX_PROFILE_BYTES = int(os.environ.get("AMS_MAX_PROFILE_BYTES", 4 * 1024 * 1024))
+MAX_PROFILE_ROWS = int(os.environ.get("AMS_MAX_PROFILE_ROWS", 8760 + 1))
+
+
 class WeekBuildRequest(BaseModel):
-    """Body of POST /api/week/build: the uploaded profile.csv as text (no multipart dep)."""
-    profile_csv: str
+    """Body of POST /api/week/build: the uploaded CSV as text (no multipart dep).
+
+    The file may have any name — the browser reads it and sends its contents; only the
+    columns matter (``hour``, optional ``timestamp``, one column per PQ load).
+    """
+    profile_csv: str = Field(..., max_length=MAX_PROFILE_BYTES)
     base: str = DEFAULT_CASE_ALIAS          # shipped alias or absolute xlsx path
     case_id: Optional[str] = None           # xlsx stem; default <base>_<N>h
     unit: str = "MW"
@@ -373,6 +382,12 @@ def _build_week_from_text(req: WeekBuildRequest) -> Dict[str, Any]:
     text = (req.profile_csv or "").strip()
     if not text:
         raise ValueError("profile_csv is empty")
+    nbytes = len(text.encode("utf-8"))
+    if nbytes > MAX_PROFILE_BYTES:
+        raise ValueError(f"profile is {nbytes} bytes; limit {MAX_PROFILE_BYTES}")
+    nrows = text.count("\n")                            # data rows (header excluded)
+    if nrows > MAX_PROFILE_ROWS:
+        raise ValueError(f"profile has {nrows} rows; limit {MAX_PROFILE_ROWS} (one year of hours)")
     WEEK_DIR.mkdir(parents=True, exist_ok=True)
     stem = (req.case_id or "").strip() or None
     if stem and not re.fullmatch(r"[A-Za-z0-9_.-]+", stem):
@@ -382,7 +397,11 @@ def _build_week_from_text(req: WeekBuildRequest) -> Dict[str, Any]:
     base_ref = _resolve_case_ref(req.base)           # built id / alias / allowlisted path only
     csv_path = WEEK_DIR / f"{stem or 'upload'}.profile.csv"
     csv_path.write_text(text + "\n")
-    art = build_week_case(base_ref, str(csv_path), str(WEEK_DIR), case_id=stem, unit=req.unit)
+    try:
+        art = build_week_case(base_ref, str(csv_path), str(WEEK_DIR), case_id=stem, unit=req.unit)
+    except Exception:
+        csv_path.unlink(missing_ok=True)                 # do not keep rejected uploads
+        raise
     case_id = Path(art.xlsx_path).stem
     # a rebuild under the same id replaces the workbook: cached solves for it are now stale
     for key in [k for k in _last_solve if k[0] == case_id]:
