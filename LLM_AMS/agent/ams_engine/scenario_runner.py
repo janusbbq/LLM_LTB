@@ -42,11 +42,11 @@ def run_comparison(spec: ScenarioSpec, out_dir: str,
     """
     base = run_case(resolve_case_path(spec.base_case), spec.routine, spec.solver, spec.ignore_dpp,
                     spec.disabled_constraints, f"{spec.id}:base")
-    if spec.method == "bus_perturbation" and base.pq_curves and not allow_base_curves:
+    if base.pq_curves and not allow_base_curves:
         raise ValueError(
             f"base case {base.case_path} already carries curve sheet {base.pq_curve_sheet!r} "
-            f"affecting loads {base.pq_curves}; a bus_perturbation comparison against it would be "
-            f"curve-vs-curve. Use a clean base case, or pass allow_base_curves=True explicitly."
+            f"affecting loads {base.pq_curves}; a {spec.method} comparison against it would mix "
+            f"load regimes. Use a clean base case, or pass allow_base_curves=True explicitly."
         )
     art, scen = run_scenario(spec, out_dir, allow_base_curves=allow_base_curves)
     return art, ComparisonResult(base=base, scenario=scen, allow_base_curves=allow_base_curves)

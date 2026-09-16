@@ -330,8 +330,14 @@ def _build_week_from_text(req: WeekBuildRequest) -> Dict[str, Any]:
     stem = (req.case_id or "").strip() or None
     if stem and not re.fullmatch(r"[A-Za-z0-9_.-]+", stem):
         raise ValueError("case_id may contain only letters, digits, '_', '.', '-'")
-    base_ref = req.base if req.base in SHIPPED_CASES or os.path.isabs(req.base) else \
-        SHIPPED_CASES.get(req.base, req.base)
+    # base may be a shipped alias, an absolute path, or the id of a case built earlier in
+    # this server (the UI sends whatever is selected in the picker)
+    if req.base in _custom_cases:
+        base_ref = _custom_cases[req.base]["path"]
+    elif req.base in SHIPPED_CASES or os.path.isabs(req.base):
+        base_ref = req.base
+    else:
+        base_ref = SHIPPED_CASES.get(req.base, req.base)
     csv_path = WEEK_DIR / f"{stem or 'upload'}.profile.csv"
     csv_path.write_text(text + "\n")
     art = build_week_case(base_ref, str(csv_path), str(WEEK_DIR), case_id=stem, unit=req.unit)
@@ -601,7 +607,9 @@ def create_app() -> FastAPI:
         for alias, label in CASE_PICKER:
             if alias in SHIPPED_CASES:
                 items.append({"alias": alias, "label": label, "path": SHIPPED_CASES[alias]})
-        for cid, c in _custom_cases.items():
+        with _lock:                                   # /api/week/build mutates _custom_cases
+            built = list(_custom_cases.items())
+        for cid, c in built:
             items.append({"alias": cid, "label": c["label"], "path": c["path"], "built": True,
                           "n_slots": c["n_slots"]})
         return {"cases": items, "default": DEFAULT_CASE_ALIAS}

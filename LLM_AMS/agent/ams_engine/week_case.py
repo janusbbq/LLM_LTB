@@ -130,7 +130,11 @@ def build_week_case(base_case: str, profile_csv: str, out_dir: str, case_id: Opt
         if members:
             sd[k] = (raw[:, members] if unit != "factor" else factor[:, members] * p0[members]).sum(axis=1) \
                 / ((p0[members] * mva).sum() if unit == "MW" else p0[members].sum())
-    resid = np.divide(factor, sd[[areas.index(a) for a in load_area], :].T, out=np.ones_like(factor), where=sd[[areas.index(a) for a in load_area], :].T != 0)   # (n, nPQ)
+    # An area whose loads are all zero in a slot has sd = 0 there; the residual is then 0/0.
+    # Use a neutral 1.0 (the demand stays 0 either way) instead of letting NaN reach the
+    # manifest / API response.
+    area_sd = sd[[areas.index(a) for a in load_area], :].T                     # (n, nPQ)
+    resid = np.divide(factor, area_sd, out=np.ones_like(factor), where=area_sd != 0)
     max_resid = float(np.abs(resid - 1).max()) if resid.size else 0.0
     write_residuals = max_resid > residual_tol
 

@@ -192,6 +192,12 @@ def write_scenario(spec: ScenarioSpec, out_dir: str, allow_base_curves: bool = F
         ss.add("Summary", field="Scenario",
                comment=f"{spec.id}: {spec.method} x{min(mult):.3f}..{max(mult):.3f} on areas {areas} "
                        f"(written by LLM_LTB case_writer {datetime.now():%Y-%m-%d})")
+        # allow_base_curves=True: the base's per-load sheets must survive the rewrite (ams's own
+        # writer drops unknown sheets). The area scaling lives in the sd rows, so carrying the
+        # curve rows through unchanged composes multiplicatively with it.
+        for sheet, df in inherited.items():
+            curve_rows[sheet] = [dict(pq=str(r.pq), slot=str(r.slot), sd=float(r.sd))
+                                 for r in df.itertuples(index=False)]
     else:
         loads = report["affected_loads"]
         for sheet, slot_model in planned_curve_sheets(spec, ss).items():

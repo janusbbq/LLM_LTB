@@ -21,6 +21,7 @@ array-equal to the base case's, because no bus changes Area.
 
 from __future__ import annotations
 
+import math
 from typing import List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -44,7 +45,8 @@ class ScenarioSpec(BaseModel):
     method: LoadMethod
     target: Optional[Union[int, str]] = Field(
         None, description="Area idx for 'regional', Bus idx for 'bus_perturbation'; omit for 'uniform'")
-    factor: Optional[float] = Field(None, gt=0, description="Constant multiplier applied in every slot")
+    factor: Optional[float] = Field(None, gt=0, allow_inf_nan=False,
+                                    description="Constant multiplier applied in every slot")
     curve: Optional[List[float]] = Field(
         None, description="Per-slot multipliers, length == horizon_slots (1 + delta(t)); all > 0")
 
@@ -61,8 +63,8 @@ class ScenarioSpec(BaseModel):
         if self.curve is not None:
             if len(self.curve) != self.horizon_slots:
                 raise ValueError(f"curve has {len(self.curve)} values but horizon_slots={self.horizon_slots}")
-            if any(not (v > 0) for v in self.curve):
-                raise ValueError("curve values must be > 0 (multipliers on load)")
+            if any(not (math.isfinite(v) and v > 0) for v in self.curve):
+                raise ValueError("curve values must be finite and > 0 (multipliers on load)")
         if self.method == "uniform" and self.target is not None:
             raise ValueError("method='uniform' takes no target")
         if self.method in ("regional", "bus_perturbation") and self.target is None:
@@ -149,12 +151,14 @@ class ComparisonResult(BaseModel):
             b, s = getattr(self.base, f), getattr(self.scenario, f)
             if b != s:
                 raise ValueError(f"base and scenario differ in {f}: {b!r} vs {s!r}; not comparable")
-        if self.scenario.pq_curves and self.base.pq_curves and not self.allow_base_curves:
+        # The base must be curve-free regardless of the scenario's method: a curve-bearing base
+        # against a uniform/regional scenario is just as much a different load regime.
+        if self.base.pq_curves and not self.allow_base_curves:
             raise ValueError(
                 f"base record {self.base.label!r} ({self.base.case_path}) already carries a per-load "
                 f"curve sheet {self.base.pq_curve_sheet!r} affecting loads {self.base.pq_curves}; "
                 f"comparing it against scenario {self.scenario.label!r} (curves on "
-                f"{self.scenario.pq_curves}) would be curve-vs-curve. Use a clean base case, or pass "
-                f"allow_base_curves=True if that is intended."
+                f"{self.scenario.pq_curves or 'none'}) would mix load regimes. Use a clean base case, "
+                f"or pass allow_base_curves=True if that is intended."
             )
         return self

@@ -229,8 +229,10 @@ class AMSContext:
         missing = {"pq", "slot", "sd"} - set(df.columns)
         if missing:
             raise ValueError(f"{sheet}: missing columns {sorted(missing)}")
-        if df["sd"].isna().any():
-            raise ValueError(f"{sheet}: NaN in sd")
+        sd_vals = pd.to_numeric(df["sd"], errors="coerce")
+        if not np.isfinite(sd_vals.to_numpy(dtype=float)).all():
+            bad = df.loc[~np.isfinite(sd_vals.to_numpy(dtype=float)), ["pq", "slot", "sd"]].values.tolist()
+            raise ValueError(f"{sheet}: sd must be finite numbers; bad rows {bad[:5]}")
         dup = df.duplicated(subset=["pq", "slot"], keep=False)
         if dup.any():
             raise ValueError(f"{sheet}: duplicate (pq, slot) rows: {df[dup][['pq', 'slot']].values.tolist()}")
