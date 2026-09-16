@@ -130,7 +130,7 @@ def build_week_case(base_case: str, profile_csv: str, out_dir: str, case_id: Opt
         if members:
             sd[k] = (raw[:, members] if unit != "factor" else factor[:, members] * p0[members]).sum(axis=1) \
                 / ((p0[members] * mva).sum() if unit == "MW" else p0[members].sum())
-    resid = factor / sd[[areas.index(a) for a in load_area], :].T   # (n, nPQ)
+    resid = np.divide(factor, sd[[areas.index(a) for a in load_area], :].T, out=np.ones_like(factor), where=sd[[areas.index(a) for a in load_area], :].T != 0)   # (n, nPQ)
     max_resid = float(np.abs(resid - 1).max()) if resid.size else 0.0
     write_residuals = max_resid > residual_tol
 
