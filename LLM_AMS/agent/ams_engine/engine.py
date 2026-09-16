@@ -22,6 +22,7 @@ from ams.core.service import LoadScale
 
 from agent.ams_engine.case_catalog import SHIPPED_CASES, resolve_case
 from agent.ams_engine.routines import (
+    PYPOWER_FAMILIES,
     compatible_solvers,
     is_routine_class,
     resolve_routine,
@@ -229,10 +230,11 @@ class AMSContext:
         missing = {"pq", "slot", "sd"} - set(df.columns)
         if missing:
             raise ValueError(f"{sheet}: missing columns {sorted(missing)}")
-        sd_vals = pd.to_numeric(df["sd"], errors="coerce")
-        if not np.isfinite(sd_vals.to_numpy(dtype=float)).all():
-            bad = df.loc[~np.isfinite(sd_vals.to_numpy(dtype=float)), ["pq", "slot", "sd"]].values.tolist()
-            raise ValueError(f"{sheet}: sd must be finite numbers; bad rows {bad[:5]}")
+        sd_arr = pd.to_numeric(df["sd"], errors="coerce").to_numpy(dtype=float)
+        ok = np.isfinite(sd_arr) & (sd_arr >= 0)          # a factor of 0 is a legitimate "load off"
+        if not ok.all():
+            bad = df.loc[~ok, ["pq", "slot", "sd"]].values.tolist()
+            raise ValueError(f"{sheet}: sd must be finite numbers >= 0; bad rows {bad[:5]}")
         dup = df.duplicated(subset=["pq", "slot"], keep=False)
         if dup.any():
             raise ValueError(f"{sheet}: duplicate (pq, slot) rows: {df[dup][['pq', 'slot']].values.tolist()}")
@@ -277,16 +279,18 @@ class AMSContext:
     def alter_load_p0(self, load_idx: str, value: float) -> None:
         if self.system is None:
             raise RuntimeError("No case loaded.")
-        curves = self.pq_curves.get(self.routine_name)
-        if curves:
-            slot_model = getattr(getattr(self.active_routine(), "timeslot", None), "model", None)
-            sheet = next((sh for sh, m in PQ_CURVE_SHEETS.items() if m == slot_model), "EDSlotPQ/UCSlotPQ")
+        # PQ.p0 is shared by every routine on the system, so a curve attached to ANY routine
+        # (not just the active one) would compound with the edit as soon as that routine runs.
+        if self.pq_curves:
+            attached = sorted({self.pq_curve_sheets.get(r, "?") for r in self.pq_curves})
+            loads = sorted({pq for pqs in self.pq_curves.values() for pq in pqs})
             raise LoadCurveConflict(
-                f"Cannot set {load_idx} p0 = {float(value)} pu: routine {self.routine_name} carries a "
-                f"per-load time curve from sheet {sheet!r} (loads with curves: {curves}). The dispatched "
-                f"load is pds = sd(area, t) x curve(pq, t) x p0, so a new p0 would be multiplied by the "
-                f"curve in every slot and the two effects would compound. Change the {sheet} curve for "
-                f"{load_idx} in the case file instead."
+                f"Cannot set {load_idx} p0 = {float(value)} pu: this case carries per-load time curves "
+                f"from sheet(s) {attached} on routines {sorted(self.pq_curves)} (loads with curves: "
+                f"{loads}); active routine is {self.routine_name}. The dispatched load is "
+                f"pds = sd(area, t) x curve(pq, t) x p0, so a new p0 would be multiplied by the curve "
+                f"in every slot and the two effects would compound. Change the {'/'.join(attached)} "
+                f"curve for {load_idx} in the case file instead."
             )
         self.system.PQ.alter(src="p0", idx=[load_idx], value=[float(value)])
         self.active_routine().update("pd")
@@ -309,6 +313,12 @@ class AMSContext:
         self.system.Line.set(src="rate_a", idx=[line_idx], attr="v", value=[float(rate_a)])
         self.active_routine().update("rate_a")
 
+    def _accepts_ignore_dpp(self) -> bool:
+        """True for cvxpy-backed routines (those with an OModel); PYPOWER routines take no such kwarg."""
+        if routine_family(self.routine_name) in PYPOWER_FAMILIES:
+            return False
+        return hasattr(self.active_routine(), "om")
+
     # ---------- Route 6: solve ----------
     def solve(self, solver: str = "CLARABEL", ignore_dpp: bool = False) -> Dict[str, Any]:
         if self.system is None:
@@ -322,7 +332,9 @@ class AMSContext:
             )
         # ignore_dpp goes through RoutineBase.run() to cvxpy prob.solve(); cvxpy 1.9.2's DPP
         # canonicalisation fails above 160 slots and ignoring DPP gives identical results.
-        # Only pass it when set so pypower-backed routines never see an unknown kwarg.
+        # It is a cvxpy-only keyword: never forward it to PYPOWER-backed routines, and record
+        # what was actually applied rather than what was asked for.
+        ignore_dpp = bool(ignore_dpp) and self._accepts_ignore_dpp()
         run_kwargs: Dict[str, Any] = {"solver": solver}
         if ignore_dpp:
             run_kwargs["ignore_dpp"] = True

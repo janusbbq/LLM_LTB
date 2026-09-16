@@ -117,7 +117,10 @@ _state = {"alias": None}                 # alias of the case currently loaded
 # case_id -> {"path", "label", "n_slots", "manifest"}. They join the picker and
 # resolve like shipped aliases; the id is the xlsx stem under generated/week/.
 _custom_cases: Dict[str, Dict[str, Any]] = {}
-WEEK_DIR = GENERATED_DIR / "week"
+# Uploaded profiles / built workbooks / manifests are NOT served: GENERATED_DIR is mounted
+# read-only at /generated for result plots, so week artifacts live outside it (data/ is
+# gitignored by pattern). Override with AMS_WEEK_DIR.
+WEEK_DIR = Path(os.environ.get("AMS_WEEK_DIR") or (Path.cwd() / "data" / "week_cases"))
 _available_routines: set = set()         # filled at startup
 
 # Cache of the most recent solve, keyed by (case_alias, routine). Lets /api/report
@@ -342,6 +345,9 @@ def _build_week_from_text(req: WeekBuildRequest) -> Dict[str, Any]:
     csv_path.write_text(text + "\n")
     art = build_week_case(base_ref, str(csv_path), str(WEEK_DIR), case_id=stem, unit=req.unit)
     case_id = Path(art.xlsx_path).stem
+    # a rebuild under the same id replaces the workbook: cached solves for it are now stale
+    for key in [k for k in _last_solve if k[0] == case_id]:
+        del _last_solve[key]
     _custom_cases[case_id] = {
         "path": art.xlsx_path,
         "label": f"{_case_label(req.base)} · {art.n_slots} h ({case_id})",

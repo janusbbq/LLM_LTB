@@ -108,6 +108,8 @@ def validate_scenario(spec: ScenarioSpec, base_system, allow_base_curves: bool =
             f"routine {spec.routine!r} is single-period; scenario studies require a timeslot routine"
         )
     n = int(rtn.timeslot.n)
+    if n != spec.horizon_slots:
+        raise ValueError(f"spec.horizon_slots={spec.horizon_slots} but {spec.routine} has {n} slots")
 
     areas = [str(a) for a in base_system.Area.idx.v]
     report: Dict[str, object] = {"routine": spec.routine, "horizon_slots": n, "curve_sheets": []}

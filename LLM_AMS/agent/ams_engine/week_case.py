@@ -145,6 +145,14 @@ def build_week_case(base_case: str, profile_csv: str, out_dir: str, case_id: Opt
 
     # ---- rebuild the slot sheets with pandas ----
     sheets: Dict[str, pd.DataFrame] = pd.read_excel(base_path, sheet_name=None, engine="openpyxl")
+    # A base that is itself a built week case carries its own EDSlotPQ/UCSlotPQ and Summary
+    # rows; they describe the OLD profile. Drop them so they can neither stay active nor be
+    # written twice — residuals for the new profile are recomputed below.
+    for sheet in PQ_CURVE_SHEETS:
+        sheets.pop(sheet, None)
+    if "Summary" in sheets:
+        stale_fields = {"Horizon", "Scenario", *PQ_CURVE_SHEETS}
+        sheets["Summary"] = sheets["Summary"][~sheets["Summary"]["field"].isin(stale_fields)].reset_index(drop=True)
     ts = [str(x) for x in df["timestamp"]] if "timestamp" in df.columns else [f"h{h}" for h in df["hour"]]
     slot_names: Dict[str, List[str]] = {}
     for slot_model, prefix in SLOT_PREFIX.items():
