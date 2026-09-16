@@ -103,9 +103,11 @@ def validate_scenario(spec: ScenarioSpec, base_system, allow_base_curves: bool =
             f"would either drop or compound those curves. Use a clean base case, or pass "
             f"allow_base_curves=True to compose the new curve onto the existing rows explicitly."
         )
-    n = int(rtn.timeslot.n) if hasattr(rtn, "timeslot") else 1
-    if n != spec.horizon_slots:
-        raise ValueError(f"spec.horizon_slots={spec.horizon_slots} but {spec.routine} has {n} slots")
+    if not hasattr(rtn, "timeslot"):
+        raise ValueError(
+            f"routine {spec.routine!r} is single-period; scenario studies require a timeslot routine"
+        )
+    n = int(rtn.timeslot.n)
 
     areas = [str(a) for a in base_system.Area.idx.v]
     report: Dict[str, object] = {"routine": spec.routine, "horizon_slots": n, "curve_sheets": []}
